@@ -1,0 +1,163 @@
+pcm.mixer {
+	type dmix
+        ipc_key 1024
+        ipc_key_add_uid 0
+	slave.pcm "hmixer"
+}
+
+pcm.hmixer {
+	type hw
+	card 1
+}
+
+# ------------ channel 0 ------------
+pcm.ch0 {
+        type softvol
+        slave.pcm "ch0_plug"
+	control {
+		name "ch0"
+	}
+}
+
+pcm.ch0_plug {
+	type plug
+	slave.pcm "ch0_equal"
+}
+
+pcm.ch0_equal {
+	type equal
+	slave.pcm "plug:mixer"
+	controls "/home/pi/.alsa_ch0_equal.bin"
+}
+
+ctl.ch0_equal {
+	type equal
+	controls "/home/pi/.alsa_ch0_equal.bin"
+}
+
+# ------------ channel 1 ------------
+pcm.ch1 {
+        type softvol
+        slave.pcm "ch1_plug"
+	control {
+		name "ch1"
+	}
+}
+
+pcm.ch1_plug {
+	type plug
+	slave.pcm "ch1_equal"
+}
+
+pcm.ch1_equal {
+	type equal
+	slave.pcm "plug:mixer"
+	controls "/home/pi/.alsa_ch1_equal.bin"
+}
+
+ctl.ch1_equal {
+	type equal
+	controls "/home/pi/.alsa_ch1_equal.bin"
+}
+
+# ------------ channel 2 ------------
+pcm.ch2 {
+        type softvol
+        slave.pcm "ch2_plug"
+	control {
+		name "ch2"
+	}
+}
+
+pcm.ch2_plug {
+	type plug
+	slave.pcm "ch2_equal"
+}
+
+pcm.ch2_equal {
+	type equal
+	slave.pcm "plug:mixer"
+	controls "/home/pi/.alsa_ch2_equal.bin"
+}
+
+ctl.ch2_equal {
+	type equal
+	controls "/home/pi/.alsa_ch2_equal.bin"
+}
+
+# ------------ channel 3 ------------
+pcm.ch3 {
+        type softvol
+        slave.pcm "ch3_plug"
+	control {
+		name "ch3"
+	}
+}
+
+pcm.ch3_plug {
+	type plug
+	slave.pcm "ch3_equal"
+}
+
+pcm.ch3_equal {
+	type equal
+	slave.pcm "plug:mixer"
+	controls "/home/pi/.alsa_ch3_equal.bin"
+}
+
+ctl.ch3_equal {
+	type equal
+	controls "/home/pi/.alsa_ch3_equal.bin"
+}
+
+# ------------ channel 4 ------------
+pcm.ch4 {
+        type softvol
+        slave.pcm "ch4_plug"
+	control {
+		name "ch4"
+	}
+}
+
+pcm.ch4_plug {
+	type plug
+	slave.pcm "ch4_equal"
+}
+
+pcm.ch4_equal {
+	type equal
+	slave.pcm "plug:mixer"
+	controls "/home/pi/.alsa_ch4_equal.bin"
+}
+
+ctl.ch4_equal {
+	type equal
+	controls "/home/pi/.alsa_ch4_equal.bin"
+}
+
+# ------------ channel 5 ------------
+pcm.ch5 {
+        type softvol
+        slave.pcm "ch5_plug"
+	control {
+		name "ch5"
+	}
+}
+
+pcm.ch5_plug {
+	type plug
+	slave.pcm "ch5_equal"
+}
+
+pcm.ch5_equal {
+	type equal
+	slave.pcm "plug:mixer"
+	controls "/home/pi/.alsa_ch5_equal.bin"
+}
+
+ctl.ch5_equal {
+	type equal
+	controls "/home/pi/.alsa_ch5_equal.bin"
+}
+
+
