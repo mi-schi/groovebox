@@ -284,7 +284,7 @@ void hardware() {
             // read sample buttons on bank b
             if (digitalRead(MCP23017_1 + sample_id + 8) == 0) {
                 printf("EVENT: set next sample for sample %d\n", sample_id);
-                play_samples[0] = 0;
+                play_samples[sample_id] = 0;
             }
             
             // set powers, 0 = on, 1 = off
