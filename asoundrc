@@ -10,6 +10,31 @@ pcm.hmixer {
 	card 1
 }
 
+# ------------ channel synth ------------
+pcm.synth {
+        type softvol
+        slave.pcm "synth_plug"
+	control {
+		name "synth"
+	}
+}
+
+pcm.synth_plug {
+	type plug
+	slave.pcm "synth_equal"
+}
+
+pcm.synth_equal {
+	type equal
+	slave.pcm "plug:mixer"
+	controls "/home/pi/.alsa_synth_equal.bin"
+}
+
+ctl.synth_equal {
+	type equal
+	controls "/home/pi/.alsa_synth_equal.bin"
+}
+
 # ------------ channel 0 ------------
 pcm.ch0 {
         type softvol
