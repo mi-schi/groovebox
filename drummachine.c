@@ -4,14 +4,15 @@
 #include <pthread.h>
 #include <errno.h>
 
-#define BPM 140
-#define SAMPLES 6
-#define SAMPLES_SIZE 25
+#define DRUM_CHANNELS 6
+#define SYNTHS 16
 
-#define FILENAME_PREFIX "/media/ramdisk/sample_"
-#define FILENAME_SIZE strlen(FILENAME_PREFIX) + 7
+#define FILENAME_PREFIX "/media/ramdisk"
 
-char *pcm_devices[6] = {"default", "default", "default", "default", "default", "default"};
+int bpm = 120;
+
+char *drum_pcm_devices[DRUM_CHANNELS] = {"default", "default", "default", "default", "default", "default"};
+char *drum_folders[DRUM_CHANNELS] = {"kick", "clap", "snare", "tom", "hat", "hihat"};
 
 char *pattern[6] = {
     "1000100010001000",
@@ -22,32 +23,40 @@ char *pattern[6] = {
     "0100010001000100"
 };
 
-int play_samples[SAMPLES] = {1, 1, 1, 1, 1, 1};
+int next_drums[DRUM_CHANNELS];
 
-pthread_mutex_t mutex_play[SAMPLES];
-pthread_cond_t cond_play[SAMPLES];
+pthread_cond_t cond_drums[DRUM_CHANNELS];
+pthread_mutex_t mutex_drums[DRUM_CHANNELS];
 
-char *get_filepath(int sample_id) {
-    char *path = malloc(FILENAME_SIZE);
-    snprintf(path, FILENAME_SIZE, "%s%02d.wav", FILENAME_PREFIX, sample_id);
+char *synth_pcm_device = "default";
+char *synth_folder = "synth";
+
+int next_synths[SYNTHS];
+
+pthread_cond_t cond_synth[SYNTHS];
+pthread_mutex_t mutex_synth[SYNTHS];
+
+char *get_filepath(char *folder, int sample_id) {
+    int path_size = strlen(FILENAME_PREFIX) + 1 + strlen(folder) + 1 + 15;
+    char *path = malloc(path_size);
+    snprintf(path, path_size, "%s/%s/sample_%03d.wav", FILENAME_PREFIX, folder, sample_id);
     printf("DEBUG: file path %s\n", path);
 
-    return path;    
+    return path;
 }
 
-void player(void* id) {
-    int sample_id = (int) id;
-    printf("INFO: start thread for sample %d\n", sample_id);
-    char *path = get_filepath(sample_id);
-    
+void player(char *folder, int sample_id, char *pcm_device, pthread_cond_t *cond, pthread_mutex_t *mutex, int *next_sample, int next_adder) {
+    int first_sample_id = sample_id;
     while (1) {
-        printf("INFO: open wav file for sample %d with pcm device %s\n", sample_id, pcm_devices[sample_id]);
+        printf("INFO: open sample %s/%d with pcm device %s\n", folder, sample_id, pcm_device);
+        char *path = get_filepath(folder, sample_id);
+
         SF_INFO sfinfo;
         SNDFILE *sndfile;
         sndfile = sf_open(path, SFM_READ, &sfinfo);
-        
+
         snd_pcm_t *pcm;
-        snd_pcm_open(&pcm, pcm_devices[sample_id], SND_PCM_STREAM_PLAYBACK, SND_PCM_NONBLOCK);
+        snd_pcm_open(&pcm, pcm_device, SND_PCM_STREAM_PLAYBACK, SND_PCM_NONBLOCK);
 
         snd_pcm_hw_params_t *params;
         snd_pcm_hw_params_alloca(&params);
@@ -63,82 +72,123 @@ void player(void* id) {
         short* buffer;
         snd_pcm_hw_params_get_period_size(params, &frames, &dir);
         buffer = malloc(frames * sfinfo.channels * sizeof(short));
-        
-        int readcount, pcmrc;
-        play_samples[sample_id] = 1;
-        
-        while (play_samples[sample_id] == 1) {
-            pthread_cond_wait(&cond_play[sample_id], &mutex_play[sample_id]);
-            pthread_mutex_unlock(&mutex_play[sample_id]);
 
-            printf("DEBUG: -> play sample %d\n", sample_id); 
-            snd_pcm_prepare(pcm);
-            
-            while ((readcount = sf_readf_short(sndfile, buffer, frames)) > 0) {
-                pcmrc = snd_pcm_writei(pcm, buffer, readcount);
+        int readcount;
+        *next_sample = 0;
+
+        while (1) {
+            pthread_cond_wait(cond, mutex);
+            pthread_mutex_unlock(mutex);
+
+            if (*next_sample == 1) {
+                printf("INFO: load new sample, old one is %s-%d\n", folder, sample_id);
+
+                break;
             }
-            
+
+            printf("DEBUG: -> play sample %s-%d\n", folder, sample_id);
+            snd_pcm_prepare(pcm);
+
+            while ((readcount = sf_readf_short(sndfile, buffer, frames)) > 0) {
+                snd_pcm_writei(pcm, buffer, readcount);
+            }
+
             sf_seek(sndfile, 0, SEEK_SET);
         }
-        
-        printf("INFO: close pcm and free buffer for sample %d\n", sample_id);
+
+        printf("INFO: close sndfile + pcm and free buffer + path for old sample %s-%d\n", folder, sample_id);
+        sf_close(sndfile);
         snd_pcm_drain(pcm);
         snd_pcm_close(pcm);
         free(buffer);
-        
-        printf("INFO: copy sample %d\n", sample_id);
-        FILE *new_sample, *sample;
-        new_sample = fopen(get_filepath((rand() % (SAMPLES_SIZE - SAMPLES)) + SAMPLES), "r");
-        sample = fopen(get_filepath(sample_id), "w");
-        
-        short b; 
-        while ((b = fgetc(new_sample)) != EOF) { 
-            fputc(b, sample); 
-        } 
-        
-        fclose(new_sample);
-        fclose(sample);
+        free(path);
+
+        sample_id = sample_id + next_adder;
+        printf("INFO: try to set new sample %s-%d\n", folder, sample_id);
+
+        if (access(get_filepath(folder, sample_id), F_OK) == -1) {
+            printf("INFO: new sample %s-%d is not available, set it to first sample %s-%d\n", folder, sample_id, folder, first_sample_id);
+            sample_id = first_sample_id;
+        }
     }
+}
+
+void synthesizer(void* id) {
+    int synth_id = (int) id;
+    printf("INFO: start thread for synth %d\n", synth_id);
+
+    player(synth_folder, synth_id, synth_pcm_device, &cond_synth[synth_id], &mutex_synth[synth_id], &next_synths[synth_id], SYNTHS);
+}
+
+void drummer(void* id) {
+    int channel_id = (int) id;
+    printf("INFO: start thread for drum channel %d\n", channel_id);
+
+    player(drum_folders[channel_id], 0, drum_pcm_devices[channel_id], &cond_drums[channel_id], &mutex_drums[channel_id], &next_drums[channel_id], 1);
+}
+
+void next_synth() {
+    for (int synth_id = 0; synth_id < SYNTHS; synth_id++) {
+        next_synths[synth_id] = 1;
+        pthread_cond_signal(&cond_synth[synth_id]);
+    }
+}
+
+void next_drum(int channel_id) {
+    next_drums[channel_id] = 1;
+    pthread_cond_signal(&cond_drums[channel_id]);
 }
 
 void hardware() {
-    srand(time(NULL));
-    
-    sleep(2);
+    sleep(1);
     printf("READER: load new file.\n");
-    play_samples[0] = 0;
+    next_drum(0);
+    pthread_cond_signal(&cond_synth[0]);
+    pthread_cond_signal(&cond_synth[15]);
+
+    sleep(1);
+    next_synth();
+
+    sleep(1);
+    pthread_cond_signal(&cond_synth[0]);
+    pthread_cond_signal(&cond_synth[15]);
 }
 
 int main(int argc, char **argv) {
-    pthread_t thread_ids[SAMPLES];    
+    pthread_t drummer_ids[DRUM_CHANNELS];
+    pthread_t synthesizer_ids[SYNTHS];
     pthread_t hardware_id;
-    
+
     pthread_create(&hardware_id, NULL, hardware, NULL);
-    
-    for (int sample_id = 0; sample_id < SAMPLES; sample_id++) {
-        printf("INFO: create player for sample %d\n", sample_id);
-        pthread_create(&thread_ids[sample_id], NULL, player, (void*)(int) sample_id);         
+
+    int channel_id;
+    for (channel_id = 0; channel_id < DRUM_CHANNELS; channel_id++) {
+        printf("INFO: create player for drum channel %d\n", channel_id);
+        pthread_create(&drummer_ids[channel_id], NULL, drummer, (void*)(int) channel_id);
     }
-    
-    sleep(1);
-    
-    int sleep_in_ms = 60000000 / BPM / 4;
+
+    for (int synth_id = 0; synth_id < SYNTHS; synth_id++) {
+        printf("INFO: create player for synthesizer %d\n", synth_id);
+        pthread_create(&synthesizer_ids[synth_id], NULL, synthesizer, (void*)(int) synth_id);
+    }
+
+    int sleep_in_ms = 60000000 / bpm / 4;
     int i = 0;
-    
-    while (i < 2) {
+
+    while (i < 3) {
         for (int beat = 0; beat < 16; beat++) {
-            for (int sample_id = 0; sample_id < SAMPLES; sample_id++) {
-                if (pattern[sample_id][beat] == '1') {
-                    printf("DEBUG: send information to play sample %d ->\n", sample_id);
-                    pthread_cond_signal(&cond_play[sample_id]);
-                }                    
+            for (channel_id = 0; channel_id < DRUM_CHANNELS; channel_id++) {
+                if (pattern[channel_id][beat] == '1') {
+                    printf("DEBUG: send information to play channel %d ->\n", channel_id);
+                    pthread_cond_signal(&cond_drums[channel_id]);
+                }
             }
-            
+
             usleep(sleep_in_ms);
         }
-        
+
         i++;
     }
-    
+
 	return 0;
 }
