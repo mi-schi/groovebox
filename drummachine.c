@@ -78,7 +78,6 @@ void player(char *folder, int sample_id, char *pcm_device, pthread_cond_t *cond,
 
         while (1) {
             pthread_cond_wait(cond, mutex);
-            pthread_mutex_unlock(mutex);
 
             if (*next_sample == 1) {
                 printf("INFO: load new sample, old one is %s-%d\n", folder, sample_id);
@@ -163,7 +162,7 @@ int main(int argc, char **argv) {
 
     int channel_id;
     for (channel_id = 0; channel_id < DRUM_CHANNELS; channel_id++) {
-        printf("INFO: create player for drum channel %d\n", channel_id);
+        printf("INFO: create player for channel %d\n", channel_id);
         pthread_create(&drummer_ids[channel_id], NULL, drummer, (void*)(int) channel_id);
     }
 
