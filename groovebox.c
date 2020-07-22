@@ -274,6 +274,16 @@ void load_pattern() {
     }
 }
 
+bool is_poti_changed(long poti_value, long old_poti_value) {
+    long poti_range = 10;
+
+    if (poti_value + poti_range < old_poti_value || poti_value - poti_range > old_poti_value) {
+        return true;
+    }
+
+    return false;
+}
+
 bool is_button_debounced(struct timeval last_push, struct timeval read_time) {
     int debounce_delay = 250 * 1000;
 
@@ -285,19 +295,16 @@ bool is_button_debounced(struct timeval last_push, struct timeval read_time) {
 }
 
 void hardware() {
-    long poti_range = 10;
+    long old_poti_bpm_value = 0;
 
-    long old_poti_bpm_value;
+    long old_poti_volume_values[DRUM_CHANNELS] = {0};
+    long old_poti_equalizer_values[DRUM_CHANNELS] = {0};
 
-    long old_poti_volume_values[DRUM_CHANNELS];
-    long old_poti_equalizer_values[DRUM_CHANNELS];
+    int old_power_led_values[DRUM_CHANNELS] = {-1};
+    int old_pattern_led_values[DRUM_CHANNELS] = {-1};
 
-    int old_power_led_values[DRUM_CHANNELS];
-    int old_pattern_led_values[DRUM_CHANNELS];
-
-    int old_synth_led_values[SYNTHS];
-    long old_poti_synth_volume_value;
-    long old_poti_synth_equalizer_value;
+    long old_poti_synth_volume_value = 0;
+    long old_poti_synth_equalizer_value = 0;
 
     struct timeval read_time,
                    last_next_pattern_push[DRUM_CHANNELS] = {0},
@@ -311,7 +318,7 @@ void hardware() {
         // set bpm
         long poti_bpm_value = analogRead(MCP3008_0 + 7);
 
-        if (poti_bpm_value + poti_range < old_poti_bpm_value || poti_bpm_value - poti_range > old_poti_bpm_value) {
+        if (is_poti_changed(poti_bpm_value, old_poti_bpm_value)) {
             bpm = (int) map(poti_bpm_value, 0, 1023, 90, 160);
             printf("EVENT: set bpm to %ld (raw %ld, further %ld)\n", bpm, poti_bpm_value, old_poti_bpm_value);
             old_poti_bpm_value = poti_bpm_value;
@@ -321,7 +328,7 @@ void hardware() {
             // set volumes
             long poti_volume_value = analogRead(MCP3008_0 + channel_id);
 
-            if (poti_volume_value + poti_range < old_poti_volume_values[channel_id] || poti_volume_value - poti_range > old_poti_volume_values[channel_id]) {
+            if (is_poti_changed(poti_volume_value, old_poti_volume_values[channel_id])) {
                 long volume = map(poti_volume_value, 0, 1023, 0, 100);
                 printf("EVENT: set volume to %ld (raw %ld, further %ld) for %s\n", volume, poti_volume_value, old_poti_volume_values[channel_id], drum_pcm_devices[channel_id]);
                 set_volume("default", ALSA_INDEX, drum_pcm_devices[channel_id], volume);
@@ -331,7 +338,7 @@ void hardware() {
             // set equalizers
             long poti_equalizer_value = analogRead(MCP3008_1 + channel_id);
 
-            if (poti_equalizer_value + poti_range < old_poti_equalizer_values[channel_id] || poti_equalizer_value - poti_range > old_poti_equalizer_values[channel_id]) {
+            if (is_poti_changed(poti_equalizer_value, old_poti_equalizer_values[channel_id])) {
                 printf("EVENT: set equalizer with poti value %ld, further %ld for %s\n", poti_equalizer_value, old_poti_equalizer_values[channel_id], drum_equalizer_cards[channel_id]);
                 set_equalizer(poti_equalizer_value, drum_equalizer_cards[channel_id]);
                 old_poti_equalizer_values[channel_id] = poti_equalizer_value;
