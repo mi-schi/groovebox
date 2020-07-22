@@ -20,7 +20,25 @@ char *pattern[6] = {
     "0010001000100010",
     "0000100000001000",
     "1000100010001000",
-    "0100010001000100"
+    "0100010001000100",
+    /*
+    // french house
+    "0101010101010101",
+    "1110101111101011",
+    // dubstep
+    "0000001000000000",
+    "1100011111011101",
+    "1010100010101000",
+    // hip hop
+    "0000010000000100",
+    "1101101111011011",
+    "1001000010110000",
+    // break beat
+    "1100010011000111",
+    "0000001000100000",
+    "0000000000000100",
+    "0000100001001000",
+    "1001001010001000" */
 };
 
 int next_drums[DRUM_CHANNELS];
@@ -143,9 +161,14 @@ void hardware() {
     printf("READER: load new file.\n");
     next_drum(0);
     pthread_cond_signal(&cond_synth[0]);
+    pthread_cond_signal(&cond_synth[2]);
+    usleep(500000);
+    pthread_cond_signal(&cond_synth[2]);
+    usleep(500000);
+    pthread_cond_signal(&cond_synth[2]);
     pthread_cond_signal(&cond_synth[15]);
 
-    sleep(1);
+    sleep(100);
     next_synth();
 
     sleep(1);

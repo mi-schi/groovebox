@@ -14,24 +14,27 @@
 
 #include <math.h>
 
-#define SAMPLES 6
-#define SAMPLES_SIZE 25
-#define ALL_PATTERN_SIZE 32
-#define EQUALIZERS 10
+#define DRUM_CHANNELS 6
+#define SYNTHS 15
 
-#define FILENAME_PREFIX "/media/ramdisk/sample_"
-#define FILENAME_SIZE strlen(FILENAME_PREFIX) + 7
+#define EQUALIZER_SIZE 10
+#define ALL_PATTERN_SIZE 19
 
-#define MCP23017_0 100
-#define MCP23017_1 200
-#define MCP3008_0 300
-#define MCP3008_1 400
+#define FILENAME_PREFIX "/media/ramdisk"
+
+// for drummachine
+#define MCP3008_0 100
+#define MCP3008_1 200
+#define MCP23017_0 300
+#define MCP23017_1 400
+
+// for synthesizer
+#define MCP23017_2 500
+#define MCP23017_3 600
 
 #define ALSA_INDEX 0
 
-char *pcm_devices[6] = {"ch0", "ch1", "ch2", "ch3", "ch4", "ch5"};
-
-char *equalizer_names[EQUALIZERS] = {
+char *equalizer_names[EQUALIZER_SIZE] = {
     "00. 31 Hz",
     "01. 63 Hz",
     "02. 125 Hz",
@@ -67,57 +70,58 @@ char *all_pattern[ALL_PATTERN_SIZE] = {
     "0010001000110010",
     "0001000000010000",
     "0010000100100000",
-    "0100000001000000",
-    // french house
-    "0101010101010101",
-    "1110101111101011",
-    // dubstep
-    "0000001000000000",
-    "1100011111011101",
-    "1010100010101000",
-    // hip hop
-    "0000010000000100",
-    "1101101111011011",
-    "1001000010110000",
-    // break beat
-    "1100010011000111",
-    "0000001000100000",
-    "0000000000000100",
-    "0000100001001000",
-    "1001001010001000"
+    "0100000001000000"
 };
 
-char *pattern[SAMPLES];
-int bpm = 140;
+char *pattern[DRUM_CHANNELS];
 
-int play_samples[SAMPLES] = {1, 1, 1, 1, 1, 1};
-int led_values[SAMPLES] = {0, 0, 0, 0, 0, 0};
-int power_values[SAMPLES] = {0, 0, 0, 0, 0, 0};
+int power_values[DRUM_CHANNELS] = {0, 0, 0, 0, 0, 0};
+int power_led_values[DRUM_CHANNELS] = {0, 0, 0, 0, 0, 0};
 
-pthread_mutex_t mutex_play[SAMPLES];
-pthread_cond_t cond_play[SAMPLES];
+int pattern_led_pins[DRUM_CHANNELS] = {MCP23017_1 + 6, MCP23017_1 + 7, MCP23017_1 + 14, MCP23017_1 + 15, MCP23017_0 + 6, MCP23017_0 + 7};
+int pattern_led_values[DRUM_CHANNELS] = {0, 0, 0, 0, 0, 0};
 
-char *get_filepath(int sample_id) {
-    char *path = malloc(FILENAME_SIZE);
-    snprintf(path, FILENAME_SIZE, "%s%02d.wav", FILENAME_PREFIX, sample_id);
+int bpm = 120;
+
+char *drum_pcm_devices[DRUM_CHANNELS] = {"ch0", "ch1", "ch2", "ch3", "ch4", "ch5"};
+char *drum_folders[DRUM_CHANNELS] = {"kick", "clap", "snare", "tom", "hat", "hihat"};
+char *drum_equalizer_cards[DRUM_CHANNELS] = {"ch0_equal", "ch1_equal", "ch2_equal", "ch3_equal", "ch4_equal", "ch5_equal"};
+
+int next_drums[DRUM_CHANNELS];
+
+pthread_cond_t cond_drums[DRUM_CHANNELS];
+pthread_mutex_t mutex_drums[DRUM_CHANNELS];
+
+char *synth_pcm_device = "synth";
+char *synth_folder = "synth";
+char *synth_equalizer_card = "synth_equal";
+
+int next_synths[SYNTHS];
+
+pthread_cond_t cond_synth[SYNTHS];
+pthread_mutex_t mutex_synth[SYNTHS];
+
+char *get_filepath(char *folder, int sample_id) {
+    int path_size = strlen(FILENAME_PREFIX) + 1 + strlen(folder) + 1 + 15;
+    char *path = malloc(path_size);
+    snprintf(path, path_size, "%s/%s/sample_%03d.wav", FILENAME_PREFIX, folder, sample_id);
     printf("DEBUG: file path %s\n", path);
 
-    return path;    
+    return path;
 }
 
-void player(void* id) {
-    int sample_id = (int) id;
-    printf("INFO: start thread for sample %d\n", sample_id);
-    char *path = get_filepath(sample_id);
-    
+void player(char *folder, int sample_id, char *pcm_device, pthread_cond_t *cond, pthread_mutex_t *mutex, int *next_sample, int next_adder) {
+    int first_sample_id = sample_id;
     while (1) {
-        printf("INFO: open wav file for sample %d with pcm device %s\n", sample_id, pcm_devices[sample_id]);
+        printf("INFO: open sample %s/%d with pcm device %s\n", folder, sample_id, pcm_device);
+        char *path = get_filepath(folder, sample_id);
+
         SF_INFO sfinfo;
         SNDFILE *sndfile;
         sndfile = sf_open(path, SFM_READ, &sfinfo);
-        
+
         snd_pcm_t *pcm;
-        snd_pcm_open(&pcm, pcm_devices[sample_id], SND_PCM_STREAM_PLAYBACK, SND_PCM_NONBLOCK);
+        snd_pcm_open(&pcm, pcm_device, SND_PCM_STREAM_PLAYBACK, SND_PCM_NONBLOCK);
 
         snd_pcm_hw_params_t *params;
         snd_pcm_hw_params_alloca(&params);
@@ -133,42 +137,74 @@ void player(void* id) {
         short* buffer;
         snd_pcm_hw_params_get_period_size(params, &frames, &dir);
         buffer = malloc(frames * sfinfo.channels * sizeof(short));
-        
-        int readcount, pcmrc;
-        play_samples[sample_id] = 1;
-        
-        while (play_samples[sample_id] == 1) {
-            pthread_cond_wait(&cond_play[sample_id], &mutex_play[sample_id]);
-            pthread_mutex_unlock(&mutex_play[sample_id]);
 
-            printf("DEBUG: -> play sample %d\n", sample_id); 
-            snd_pcm_prepare(pcm);
-            
-            while ((readcount = sf_readf_short(sndfile, buffer, frames)) > 0) {
-                pcmrc = snd_pcm_writei(pcm, buffer, readcount);
+        int readcount;
+        *next_sample = 0;
+
+        while (1) {
+            pthread_cond_wait(cond, mutex);
+
+            if (*next_sample == 1) {
+                printf("INFO: load new sample, old one is %s-%d\n", folder, sample_id);
+
+                break;
             }
-            
+
+            printf("DEBUG: -> play sample %s-%d\n", folder, sample_id);
+            snd_pcm_prepare(pcm);
+
+            while ((readcount = sf_readf_short(sndfile, buffer, frames)) > 0) {
+                snd_pcm_writei(pcm, buffer, readcount);
+            }
+
             sf_seek(sndfile, 0, SEEK_SET);
         }
-        
-        printf("INFO: close pcm and free buffer for sample %d\n", sample_id);
+
+        printf("INFO: close sndfile + pcm and free buffer + path for old sample %s-%d\n", folder, sample_id);
+        sf_close(sndfile);
         snd_pcm_drain(pcm);
         snd_pcm_close(pcm);
         free(buffer);
-        
-        printf("INFO: copy sample %d\n", sample_id);
-        FILE *new_sample, *sample;
-        new_sample = fopen(get_filepath((rand() % (SAMPLES_SIZE - SAMPLES)) + SAMPLES), "r");
-        sample = fopen(get_filepath(sample_id), "w");
-        
-        short b; 
-        while ((b = fgetc(new_sample)) != EOF) { 
-            fputc(b, sample); 
-        } 
-        
-        fclose(new_sample);
-        fclose(sample);
+        free(path);
+
+        sample_id = sample_id + next_adder;
+        printf("INFO: try to set new sample %s-%d\n", folder, sample_id);
+
+        if (access(get_filepath(folder, sample_id), F_OK) == -1) {
+            printf("INFO: new sample %s-%d is not available, set it to first sample %s-%d\n", folder, sample_id, folder, first_sample_id);
+            sample_id = first_sample_id;
+        }
     }
+}
+
+void synthesizer(void* id) {
+    int synth_id = (int) id;
+    printf("INFO: start thread for synth %d\n", synth_id);
+
+    player(synth_folder, synth_id, synth_pcm_device, &cond_synth[synth_id], &mutex_synth[synth_id], &next_synths[synth_id], SYNTHS);
+}
+
+void drummer(void* id) {
+    int channel_id = (int) id;
+    printf("INFO: start thread for drum channel %d\n", channel_id);
+
+    player(drum_folders[channel_id], 0, drum_pcm_devices[channel_id], &cond_drums[channel_id], &mutex_drums[channel_id], &next_drums[channel_id], 1);
+}
+
+void next_synth() {
+    for (int synth_id = 0; synth_id < SYNTHS; synth_id++) {
+        next_synths[synth_id] = 1;
+        pthread_cond_signal(&cond_synth[synth_id]);
+    }
+}
+
+void next_drum(int channel_id) {
+    next_drums[channel_id] = 1;
+    pthread_cond_signal(&cond_drums[channel_id]);
+}
+
+void next_pattern(int i) {
+    pattern[i] = all_pattern[rand() % ALL_PATTERN_SIZE];
 }
 
 long map(long poti_value, long in_min, long in_max, long out_min, long out_max) {
@@ -202,185 +238,285 @@ void close_mixer(snd_mixer_t *handle) {
 
 void set_volume(char *card, int alsa_index, char *selem_name, long volume) {
     snd_mixer_t *handle;
-    
+
     handle = open_mixer(card);
     snd_mixer_elem_t* elem = find_selem(handle, alsa_index, selem_name);
-    
+
     long min, max;
     snd_mixer_selem_get_playback_volume_range(elem, &min, &max);
     snd_mixer_selem_set_playback_volume_all(elem, volume * max / 100);
-    
+
     snd_mixer_close(handle);
 }
 
-void set_equalizer(long poti_value, int sample_id) {
-    char *card = malloc(10);
-    snprintf(card, 10, "ch%d_equal", sample_id);
-    printf("DEBUG: equalizer card %s\n", card);
-    
+void set_equalizer(long poti_value, char * card) {
     long factor = map(poti_value, 0, 1023, 50, -50);
     long adder = 66;
-    
+
     if (poti_value < 512) {
         adder = map(poti_value, 0, 511, 50, 66);
     } else {
         adder = map(poti_value, 512, 1023, 66, 50);
     }
-    
-    for (int channel = 0; channel < EQUALIZERS; channel++) {
-        long equalizer_value = factor * cos(channel / M_PI) + adder;
-        printf("INFO: set volume to %d for equalizer channel %s for sample %d\n", equalizer_value, equalizer_names[channel], sample_id);
-        set_volume(card, ALSA_INDEX, equalizer_names[channel], equalizer_value);
+
+    for (int channel_id = 0; channel_id < EQUALIZER_SIZE; channel_id++) {
+        long equalizer_value = factor * cos(channel_id / M_PI) + adder;
+        printf("INFO: set volume to %ld for equalizer channel %s for %s\n", equalizer_value, equalizer_names[channel_id], card);
+        set_volume(card, ALSA_INDEX, equalizer_names[channel_id], equalizer_value);
     }
 }
 
 void load_pattern() {
-    for (int i = 0; i < SAMPLES; i++) {
+    srand(time(NULL));
+
+    for (int i = 0; i < DRUM_CHANNELS; i++) {
         pattern[i] = all_pattern[i];
     }
 }
 
-void next_pattern(int i) {
-    pattern[i] = all_pattern[rand() % ALL_PATTERN_SIZE];
+bool is_button_debounced(struct timeval last_push, struct timeval read_time) {
+    int debounce_delay = 250 * 1000;
+
+    if (last_push.tv_sec * 1000000 + last_push.tv_usec + debounce_delay < read_time.tv_sec * 1000000 + read_time.tv_usec) {
+        return true;
+    }
+
+    return false;
 }
 
 void hardware() {
-    srand(time(NULL));
-    
-    long poti_volume_values[SAMPLES];
-    long poti_equalizer_values[SAMPLES];
     long poti_range = 10;
-    int old_led_values[SAMPLES];
-        
+
+    long old_poti_bpm_value;
+
+    long old_poti_volume_values[DRUM_CHANNELS];
+    long old_poti_equalizer_values[DRUM_CHANNELS];
+
+    int old_power_led_values[DRUM_CHANNELS];
+    int old_pattern_led_values[DRUM_CHANNELS];
+
+    int old_synth_led_values[SYNTHS];
+    long old_poti_synth_volume_value;
+    long old_poti_synth_equalizer_value;
+
+    struct timeval read_time,
+                   last_next_pattern_push[DRUM_CHANNELS] = {0},
+                   last_next_sample_push[DRUM_CHANNELS] = {0},
+                   last_synth_push[SYNTHS] = {0},
+                   last_next_synth_push = {0};
+
     while (1) {
-        for (int sample_id = 0; sample_id < SAMPLES; sample_id++) {
+        gettimeofday(&read_time, NULL);
+
+        // set bpm
+        long poti_bpm_value = analogRead(MCP3008_0 + 7);
+
+        if (poti_bpm_value + poti_range < old_poti_bpm_value || poti_bpm_value - poti_range > old_poti_bpm_value) {
+            bpm = (int) map(poti_bpm_value, 0, 1023, 90, 160);
+            printf("EVENT: set bpm to %ld (raw %ld, further %ld)\n", bpm, poti_bpm_value, old_poti_bpm_value);
+            old_poti_bpm_value = poti_bpm_value;
+        }
+
+        for (int channel_id = 0; channel_id < DRUM_CHANNELS; channel_id++) {
             // set volumes
-            long poti_volume_value = analogRead(MCP3008_0 + sample_id);
-            
-            if (poti_volume_value + poti_range < poti_volume_values[sample_id] || poti_volume_value - poti_range > poti_volume_values[sample_id]) {
+            long poti_volume_value = analogRead(MCP3008_0 + channel_id);
+
+            if (poti_volume_value + poti_range < old_poti_volume_values[channel_id] || poti_volume_value - poti_range > old_poti_volume_values[channel_id]) {
                 long volume = map(poti_volume_value, 0, 1023, 0, 100);
-                printf("INFO: set volume to %d (raw %d, further %d) for %s\n", volume, poti_volume_value, poti_volume_values[sample_id], pcm_devices[sample_id]);
-                set_volume("default", ALSA_INDEX, pcm_devices[sample_id], volume);
-                poti_volume_values[sample_id] = poti_volume_value;
+                printf("EVENT: set volume to %ld (raw %ld, further %ld) for %s\n", volume, poti_volume_value, old_poti_volume_values[channel_id], drum_pcm_devices[channel_id]);
+                set_volume("default", ALSA_INDEX, drum_pcm_devices[channel_id], volume);
+                old_poti_volume_values[channel_id] = poti_volume_value;
             }
-            
+
             // set equalizers
-            long poti_equalizer_value = analogRead(MCP3008_1 + sample_id);
-            
-            if (poti_equalizer_value + poti_range < poti_equalizer_values[sample_id] || poti_equalizer_value - poti_range > poti_equalizer_values[sample_id]) {
-                printf("INFO: set equalizer with poti value %d, further %d for sample %d\n", poti_equalizer_value, poti_equalizer_values[sample_id], sample_id);
-                set_equalizer(poti_equalizer_value, sample_id);  
-                poti_equalizer_values[sample_id] = poti_equalizer_value;
+            long poti_equalizer_value = analogRead(MCP3008_1 + channel_id);
+
+            if (poti_equalizer_value + poti_range < old_poti_equalizer_values[channel_id] || poti_equalizer_value - poti_range > old_poti_equalizer_values[channel_id]) {
+                printf("EVENT: set equalizer with poti value %ld, further %ld for %s\n", poti_equalizer_value, old_poti_equalizer_values[channel_id], drum_equalizer_cards[channel_id]);
+                set_equalizer(poti_equalizer_value, drum_equalizer_cards[channel_id]);
+                old_poti_equalizer_values[channel_id] = poti_equalizer_value;
             }
-            
+
             // read pattern buttons on bank a
-            if (digitalRead(MCP23017_1 + sample_id) == 0) {
-                printf("EVENT: set next pattern for sample %d\n", sample_id);
-                pthread_mutex_lock(&mutex_play[sample_id]);
-                next_pattern(sample_id);
-                pthread_mutex_unlock(&mutex_play[sample_id]);
+            if (digitalRead(MCP23017_1 + channel_id) == 0 && is_button_debounced(last_next_pattern_push[channel_id], read_time)) {
+                printf("EVENT: set next pattern for channel %d\n", channel_id);
+                gettimeofday(&last_next_pattern_push[channel_id], NULL);
+                pthread_mutex_lock(&mutex_drums[channel_id]);
+                next_pattern(channel_id);
+                pthread_mutex_unlock(&mutex_drums[channel_id]);
             }
-            
+
             // read sample buttons on bank b
-            if (digitalRead(MCP23017_1 + sample_id + 8) == 0) {
-                printf("EVENT: set next sample for sample %d\n", sample_id);
-                play_samples[sample_id] = 0;
+            if (digitalRead(MCP23017_1 + channel_id + 8) == 0 && is_button_debounced(last_next_sample_push[channel_id], read_time)) {
+                printf("EVENT: set next sample for channel %d\n", channel_id);
+                gettimeofday(&last_next_sample_push[channel_id], NULL);
+                next_drum(channel_id);
             }
-            
+
             // set powers, 0 = on, 1 = off
-            int power = digitalRead(MCP23017_0 + sample_id);
-            
-            if (power == 0 && power_values[sample_id] == 0) {
-                power_values[sample_id] = 1;
-            } 
-            
-            if (power == 1 && power_values[sample_id] == 1) {
-                power_values[sample_id] = 0;
+            int power = digitalRead(MCP23017_0 + channel_id);
+
+            if (power == 0 && power_values[channel_id] == 0) {
+                power_values[channel_id] = 1;
             }
-            
+
+            if (power == 1 && power_values[channel_id] == 1) {
+                power_values[channel_id] = 0;
+            }
+
             // switch leds
-            if (led_values[sample_id] != old_led_values[sample_id]) {
-                digitalWrite(MCP23017_0 + 8 + sample_id, led_values[sample_id]);
-                old_led_values[sample_id] = led_values[sample_id];
+            if (power_led_values[channel_id] != old_power_led_values[channel_id]) {
+                digitalWrite(MCP23017_0 + 8 + channel_id, power_led_values[channel_id]);
+                old_power_led_values[channel_id] = power_led_values[channel_id];
+            }
+
+            if (pattern_led_values[channel_id] != old_pattern_led_values[channel_id]) {
+                digitalWrite(pattern_led_pins[channel_id], pattern_led_values[channel_id]);
+                old_pattern_led_values[channel_id] = pattern_led_values[channel_id];
             }
         }
-        
-        usleep(50000*2);
+
+        // set synth volume
+        long poti_synth_volume_value = analogRead(MCP3008_1 + 6);
+
+        if (poti_synth_volume_value + poti_range < old_poti_synth_volume_value || poti_synth_volume_value - poti_range > old_poti_synth_volume_value) {
+            long volume = map(poti_synth_volume_value, 0, 1023, 0, 100);
+            printf("EVENT: set volume to %ld (raw %ld, further %ld) for %s\n", volume, poti_synth_volume_value, old_poti_synth_volume_value, synth_pcm_device);
+            set_volume("default", ALSA_INDEX, synth_pcm_device, volume);
+            old_poti_synth_volume_value = poti_synth_volume_value;
+        }
+
+        // set synth equalizer
+        long poti_synth_equalizer_value = analogRead(MCP3008_1 + 7);
+
+        if (poti_synth_equalizer_value + poti_range < old_poti_synth_equalizer_value || poti_synth_equalizer_value - poti_range > old_poti_synth_equalizer_value) {
+            printf("EVENT: set equalizer with poti value %ld, further %ld for %s\n", poti_synth_equalizer_value, old_poti_synth_equalizer_value, synth_equalizer_card);
+            set_equalizer(poti_synth_equalizer_value, synth_equalizer_card);
+            old_poti_synth_equalizer_value = poti_synth_equalizer_value;
+        }
+
+        for (int synth_id = 0; synth_id < SYNTHS; synth_id++) {
+            // play synthesizer
+            if (digitalRead(MCP23017_2 + synth_id) == 0) {
+                if (is_button_debounced(last_synth_push[synth_id], read_time)) {
+                    printf("EVENT: send information to play synth %d ->\n", synth_id);
+                    gettimeofday(&last_synth_push[synth_id], NULL);
+                    pthread_cond_signal(&cond_synth[synth_id]);
+                    digitalWrite(MCP23017_3 + synth_id, 1);
+                }
+            } else {
+                digitalWrite(MCP23017_3 + synth_id, 0);
+            }
+        }
+
+        // set next synths
+        if (digitalRead(MCP23017_2 + 15) == 0 && is_button_debounced(last_next_synth_push, read_time)) {
+            printf("EVENT: set next synths\n");
+            gettimeofday(&last_next_synth_push, NULL);
+            next_synth();
+        }
     }
 }
 
 int main(int argc, char **argv) {
     printf("INFO: initialize hardware\n");
     wiringPiSetup();
-  
+
     mcp23017Setup(MCP23017_0, 0x20);
     mcp23017Setup(MCP23017_1, 0x21);
-  
+    mcp23017Setup(MCP23017_2, 0x22);
+    mcp23017Setup(MCP23017_3, 0x23);
+
     mcp3004Setup(MCP3008_0, 0);
     mcp3004Setup(MCP3008_1, 1);
 
-    printf("INFO: set mcp23017 bank a\n");
+    printf("INFO: set mcp23017 0/1 bank a for powers, next pattern and mixed pattern-leds\n");
     int i;
-    for (i = 0; i < 8; i++) {
+    for (i = 0; i < DRUM_CHANNELS; i++) {
         pinMode(MCP23017_0 + i, INPUT);
         pullUpDnControl(MCP23017_0 + i, PUD_UP);
-        
+
         pinMode(MCP23017_1 + i, INPUT);
         pullUpDnControl(MCP23017_1 + i, PUD_UP);
+
+        pinMode(pattern_led_pins[i], OUTPUT);
     }
-    
-    printf("INFO: set mcp23017 bank b\n");
-    for (i = 8; i < 16; i++) {
+
+    printf("INFO: set mcp23017 0/1 bank b for power-leds and next samples\n");
+    for (i = 8; i < 8 + DRUM_CHANNELS; i++) {
         pinMode(MCP23017_0 + i, OUTPUT);
-        
+
         pinMode(MCP23017_1 + i, INPUT);
         pullUpDnControl(MCP23017_1 + i, PUD_UP);
     }
-    
+
+    printf("INFO: set mcp23017 2/3 for synthesizer for buttons and leds\n");
+    for (i = 0; i < 16; i++) {
+        pinMode(MCP23017_2 + i, INPUT);
+        pullUpDnControl(MCP23017_2 + i, PUD_UP);
+
+        pinMode(MCP23017_3 + i, OUTPUT);
+    }
+
     sleep(1);
-    
-    pthread_t thread_ids[SAMPLES];
+
+    pthread_t drummer_ids[DRUM_CHANNELS];
+    pthread_t synthesizer_ids[SYNTHS];
     pthread_t hardware_id;
-    
+
     printf("INFO: start hardware loop\n");
     pthread_create(&hardware_id, NULL, hardware, NULL);
-    
-    for (int sample_id = 0; sample_id < SAMPLES; sample_id++) {
-        printf("INFO: create player for sample %d\n", sample_id);
-        pthread_create(&thread_ids[sample_id], NULL, player, (void*)(int) sample_id);         
+
+    int channel_id;
+    for (channel_id = 0; channel_id < DRUM_CHANNELS; channel_id++) {
+        printf("INFO: create player for drum channel %d\n", channel_id);
+        pthread_create(&drummer_ids[channel_id], NULL, drummer, (void*)(int) channel_id);
     }
-    
+
+    for (int synth_id = 0; synth_id < SYNTHS; synth_id++) {
+        printf("INFO: create player for synthesizer %d\n", synth_id);
+        pthread_create(&synthesizer_ids[synth_id], NULL, synthesizer, (void*)(int) synth_id);
+    }
+
     sleep(1);
-    
+
     printf("INFO: load pattern\n");
     load_pattern();
-    
+
     struct timeval start_time, end_time;
-    int default_sleep_in_ms = 60000000 / bpm / 4;
-    
+
     while (1) {
         for (int beat = 0; beat < 16; beat++) {
             gettimeofday(&start_time, NULL);
-            for (int sample_id = 0; sample_id < SAMPLES; sample_id++) {
-                if (pattern[sample_id][beat] == '1' && power_values[sample_id] == 1) {
-                    printf("DEBUG: send information to play sample %d ->\n", sample_id);
-                    led_values[sample_id] = 1;
-                    pthread_cond_signal(&cond_play[sample_id]);
+            for (int channel_id = 0; channel_id < DRUM_CHANNELS; channel_id++) {
+                if (pattern[channel_id][beat] == '1') {
+                    pattern_led_values[channel_id] = 1;
+
+                    if (power_values[channel_id] == 1) {
+                        printf("DEBUG: send information to play drum channel %d ->\n", channel_id);
+                        pthread_cond_signal(&cond_drums[channel_id]);
+                        power_led_values[channel_id] = 1;
+                    } else {
+                        power_led_values[channel_id] = 0;
+                    }
                 } else {
-                    led_values[sample_id] = 0;
-                }                 
+                    pattern_led_values[channel_id] = 0;
+                    power_led_values[channel_id] = 0;
+                }
             }
-            
+
+            int default_sleep_in_microseconds = 60000000 / bpm / 4;
             gettimeofday(&end_time, NULL);
             int elapsed_microseconds = end_time.tv_usec - start_time.tv_usec;
-            int sleep_in_ms = default_sleep_in_ms - elapsed_microseconds;
-            printf("DEBUG: elapsed microseconds %d, default microseconds are %d, so sleep %d microseconds\n", elapsed_microseconds, default_sleep_in_ms, sleep_in_ms);
-            
+
+            int sleep_in_ms = default_sleep_in_microseconds - elapsed_microseconds;
+            printf("DEBUG: elapsed microseconds %d, default microseconds are %d, so sleep %d microseconds\n", elapsed_microseconds, default_sleep_in_microseconds, sleep_in_ms);
+
             if (sleep_in_ms > 0) {
                 usleep(sleep_in_ms);
             }
         }
     }
-    
+
 	return 0;
 }
