@@ -1,6 +1,6 @@
 # groovebox
 
-The alsa configuration for raspi can be found in ´asoundrc´. Rename it to ´.asoundrc´ and copy it to the home directory of your raspberry. There is a concatination between volume and equalizer using alsa softvol and alsa equal for each of the channels.
+The alsa configuration for raspi can be found in `asoundrc`. Rename it to `.asoundrc` and copy it to the home directory of your raspberry or if you want it globally to `/etc/asound.conf`. There is a concatination between volume and equalizer using alsa softvol and alsa equal for each of the channels.
 
 There are a lot of configuration for raspi to run the project. Contact me, if you have problems or questions.
 
