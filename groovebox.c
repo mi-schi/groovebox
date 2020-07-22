@@ -386,7 +386,7 @@ void hardware() {
         // set synth volume
         long poti_synth_volume_value = analogRead(MCP3008_1 + 6);
 
-        if (poti_synth_volume_value + poti_range < old_poti_synth_volume_value || poti_synth_volume_value - poti_range > old_poti_synth_volume_value) {
+        if (is_poti_changed(poti_synth_volume_value, old_poti_synth_volume_value)) {
             long volume = map(poti_synth_volume_value, 0, 1023, 0, 100);
             printf("EVENT: set volume to %ld (raw %ld, further %ld) for %s\n", volume, poti_synth_volume_value, old_poti_synth_volume_value, synth_pcm_device);
             set_volume("default", ALSA_INDEX, synth_pcm_device, volume);
@@ -396,7 +396,7 @@ void hardware() {
         // set synth equalizer
         long poti_synth_equalizer_value = analogRead(MCP3008_1 + 7);
 
-        if (poti_synth_equalizer_value + poti_range < old_poti_synth_equalizer_value || poti_synth_equalizer_value - poti_range > old_poti_synth_equalizer_value) {
+        if (is_poti_changed(poti_synth_equalizer_value, old_poti_synth_equalizer_value)) {
             printf("EVENT: set equalizer with poti value %ld, further %ld for %s\n", poti_synth_equalizer_value, old_poti_synth_equalizer_value, synth_equalizer_card);
             set_equalizer(poti_synth_equalizer_value, synth_equalizer_card);
             old_poti_synth_equalizer_value = poti_synth_equalizer_value;
