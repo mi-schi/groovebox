@@ -18,7 +18,7 @@ To test, if the code works on a normal computer.
 
 ## groovbox.c
 
-The code for the whole project on raspi with mcp23017 and mcp3008 connection. See microcontroller.png for the circuit diagram. I've added a second mcp3008 microcontroller to raspi port 26.
+The code for the whole project on raspi with mcp23017 and mcp3008 connection. See microcontroller.png for the circuit diagram.
 
     gcc ./groovebox.c ./groovebox -lsndfile -lasound -lpthread -lwiringPi -lm
 
