@@ -7,6 +7,7 @@
 
 #include <alsa/asoundlib.h>
 #include <stdbool.h>
+#include <sys/time.h>
 
 #include <sndfile.h>
 #include <pthread.h>
@@ -284,10 +285,8 @@ bool is_poti_changed(long poti_value, long old_poti_value) {
     return false;
 }
 
-bool is_button_debounced(struct timeval last_push) {
+bool is_button_debounced(struct timeval last_push, struct timeval read_time) {
     int debounce_delay = 250 * 1000;
-    struct timeval read_time;
-    gettimeofday(&read_time, NULL);
 
     if (last_push.tv_sec * 1000000 + last_push.tv_usec + debounce_delay < read_time.tv_sec * 1000000 + read_time.tv_usec) {
         return true;
@@ -308,12 +307,15 @@ void hardware() {
     long old_poti_synth_volume_value = 0;
     long old_poti_synth_equalizer_value = 0;
 
-    struct timeval last_next_pattern_push[DRUM_CHANNELS] = {0},
+    struct timeval read_time,
+                   last_next_pattern_push[DRUM_CHANNELS] = {0},
                    last_next_sample_push[DRUM_CHANNELS] = {0},
                    last_synth_push[SYNTHS] = {0},
                    last_next_synth_push = {0};
 
     while (1) {
+        gettimeofday(&read_time, NULL);
+
         // set bpm
         long poti_bpm_value = analogRead(MCP3008_0 + 7);
 
@@ -344,7 +346,7 @@ void hardware() {
             }
 
             // read pattern buttons on bank a
-            if (digitalRead(MCP23017_1 + channel_id) == 0 && is_button_debounced(last_next_pattern_push[channel_id])) {
+            if (digitalRead(MCP23017_1 + channel_id) == 0 && is_button_debounced(last_next_pattern_push[channel_id], read_time)) {
                 printf("EVENT: set next pattern for channel %d\n", channel_id);
                 gettimeofday(&last_next_pattern_push[channel_id], NULL);
                 pthread_mutex_lock(&mutex_drums[channel_id]);
@@ -353,7 +355,7 @@ void hardware() {
             }
 
             // read sample buttons on bank b
-            if (digitalRead(MCP23017_1 + channel_id + 8) == 0 && is_button_debounced(last_next_sample_push[channel_id])) {
+            if (digitalRead(MCP23017_1 + channel_id + 8) == 0 && is_button_debounced(last_next_sample_push[channel_id], read_time)) {
                 printf("EVENT: set next sample for channel %d\n", channel_id);
                 gettimeofday(&last_next_sample_push[channel_id], NULL);
                 next_drum(channel_id);
@@ -404,7 +406,7 @@ void hardware() {
         for (int synth_id = 0; synth_id < SYNTHS; synth_id++) {
             // play synthesizer
             if (digitalRead(MCP23017_2 + synth_id) == 0) {
-                if (is_button_debounced(last_synth_push[synth_id])) {
+                if (is_button_debounced(last_synth_push[synth_id], read_time)) {
                     printf("EVENT: send information to play synth %d ->\n", synth_id);
                     gettimeofday(&last_synth_push[synth_id], NULL);
                     pthread_cond_signal(&cond_synth[synth_id]);
@@ -416,7 +418,7 @@ void hardware() {
         }
 
         // set next synths
-        if (digitalRead(MCP23017_2 + 15) == 0 && is_button_debounced(last_next_synth_push)) {
+        if (digitalRead(MCP23017_2 + 15) == 0 && is_button_debounced(last_next_synth_push, read_time)) {
             printf("EVENT: set next synths\n");
             gettimeofday(&last_next_synth_push, NULL);
             next_synth();
