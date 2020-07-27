@@ -92,6 +92,7 @@ int next_drums[DRUM_CHANNELS];
 
 pthread_cond_t cond_drums[DRUM_CHANNELS];
 pthread_mutex_t mutex_drums[DRUM_CHANNELS];
+int fast_play_drums[DRUM_CHANNELS];
 
 char *synth_pcm_device = "synth";
 char *synth_folder = "synth";
@@ -101,6 +102,7 @@ int next_synths[SYNTHS];
 
 pthread_cond_t cond_synth[SYNTHS];
 pthread_mutex_t mutex_synth[SYNTHS];
+int fast_play_synths[SYNTHS];
 
 char *get_filepath(char *folder, int sample_id) {
     int path_size = strlen(FILENAME_PREFIX) + 1 + strlen(folder) + 1 + 15;
@@ -111,7 +113,7 @@ char *get_filepath(char *folder, int sample_id) {
     return path;
 }
 
-void player(char *folder, int sample_id, char *pcm_device, pthread_cond_t *cond, pthread_mutex_t *mutex, int *next_sample, int next_adder) {
+void player(char *folder, int sample_id, char *pcm_device, pthread_cond_t *cond, pthread_mutex_t *mutex, int *fast_play, int *next_sample, int next_adder) {
     int first_sample_id = sample_id;
     while (1) {
         printf("INFO: open sample %s/%d with pcm device %s\n", folder, sample_id, pcm_device);
@@ -122,7 +124,7 @@ void player(char *folder, int sample_id, char *pcm_device, pthread_cond_t *cond,
         sndfile = sf_open(path, SFM_READ, &sfinfo);
 
         snd_pcm_t *pcm;
-        snd_pcm_open(&pcm, pcm_device, SND_PCM_STREAM_PLAYBACK, SND_PCM_NONBLOCK);
+        snd_pcm_open(&pcm, pcm_device, SND_PCM_STREAM_PLAYBACK, SND_PCM_ASYNC);
 
         snd_pcm_hw_params_t *params;
         snd_pcm_hw_params_alloca(&params);
@@ -143,7 +145,12 @@ void player(char *folder, int sample_id, char *pcm_device, pthread_cond_t *cond,
         *next_sample = 0;
 
         while (1) {
-            pthread_cond_wait(cond, mutex);
+            if (*fast_play == 0) {
+                printf("DEBUG: wait for event to play sample %s-%d\n", folder, sample_id);
+                pthread_cond_wait(cond, mutex);
+            }
+
+            *fast_play = 0;
 
             if (*next_sample == 1) {
                 printf("INFO: load new sample, old one is %s-%d\n", folder, sample_id);
@@ -156,6 +163,13 @@ void player(char *folder, int sample_id, char *pcm_device, pthread_cond_t *cond,
 
             while ((readcount = sf_readf_short(sndfile, buffer, frames)) > 0) {
                 snd_pcm_writei(pcm, buffer, readcount);
+
+                if (*fast_play == 1) {
+                    printf("DEBUG: activate fast play for sample %s-%d\n", folder, sample_id);
+                    *fast_play = -1;
+
+                    break;
+                }
             }
 
             sf_seek(sndfile, 0, SEEK_SET);
@@ -182,14 +196,14 @@ void synthesizer(void* id) {
     int synth_id = (int) id;
     printf("INFO: start thread for synth %d\n", synth_id);
 
-    player(synth_folder, synth_id, synth_pcm_device, &cond_synth[synth_id], &mutex_synth[synth_id], &next_synths[synth_id], SYNTHS);
+    player(synth_folder, synth_id, synth_pcm_device, &cond_synth[synth_id], &mutex_synth[synth_id], &fast_play_synths[synth_id], &next_synths[synth_id], SYNTHS);
 }
 
 void drummer(void* id) {
     int channel_id = (int) id;
     printf("INFO: start thread for drum channel %d\n", channel_id);
 
-    player(drum_folders[channel_id], 0, drum_pcm_devices[channel_id], &cond_drums[channel_id], &mutex_drums[channel_id], &next_drums[channel_id], 1);
+    player(drum_folders[channel_id], 0, drum_pcm_devices[channel_id], &cond_drums[channel_id], &mutex_drums[channel_id], &fast_play_drums[channel_id], &next_drums[channel_id], 1);
 }
 
 void next_synth() {
@@ -286,9 +300,16 @@ bool is_poti_changed(long poti_value, long old_poti_value) {
 }
 
 bool is_button_debounced(struct timeval last_push, struct timeval read_time) {
-    int debounce_delay = 250 * 1000;
+    long debounce_delay = 250 * 1000;
 
-    if (last_push.tv_sec * 1000000 + last_push.tv_usec + debounce_delay < read_time.tv_sec * 1000000 + read_time.tv_usec) {
+    if (last_push.tv_sec == 0) {
+        return true;
+    }
+
+    long diff_sec = (long) read_time.tv_sec - (long) last_push.tv_sec;
+    long diff_usec = (long) read_time.tv_usec - (long) last_push.tv_usec;
+
+    if (diff_sec * 1000000 + diff_usec > debounce_delay) {
         return true;
     }
 
@@ -410,6 +431,7 @@ void hardware() {
                     printf("EVENT: send information to play synth %d ->\n", synth_id);
                     gettimeofday(&last_synth_push[synth_id], NULL);
                     pthread_cond_signal(&cond_synth[synth_id]);
+                    fast_play_synths[synth_id] = 1;
                     digitalWrite(MCP23017_3 + synth_id, 1);
                 }
             } else {
@@ -503,6 +525,7 @@ int main(int argc, char **argv) {
                     if (power_values[channel_id] == 1) {
                         printf("DEBUG: send information to play drum channel %d ->\n", channel_id);
                         pthread_cond_signal(&cond_drums[channel_id]);
+                        fast_play_drums[channel_id] = 1;
                         power_led_values[channel_id] = 1;
                     } else {
                         power_led_values[channel_id] = 0;
