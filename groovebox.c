@@ -370,9 +370,7 @@ void hardware() {
             if (digitalRead(MCP23017_1 + channel_id) == 0 && is_button_debounced(last_next_pattern_push[channel_id], read_time)) {
                 printf("EVENT: set next pattern for channel %d\n", channel_id);
                 gettimeofday(&last_next_pattern_push[channel_id], NULL);
-                pthread_mutex_lock(&mutex_drums[channel_id]);
                 next_pattern(channel_id);
-                pthread_mutex_unlock(&mutex_drums[channel_id]);
             }
 
             // read sample buttons on bank b
