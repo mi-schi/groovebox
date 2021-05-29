@@ -62,3 +62,5 @@ Use sox to convert the wav files:
     sox input.wav --bits 16 --channels 1 --endian little --encoding signed-integer sample_000.wav
     
 Use the given folder structure and the file name pattern "sample_XXX.wav".
+Look into `multiple_converter.sh`. You can create a folder `samples_collected` with the given subfolder,
+copy all you samples in the folders and convert and rename it to the `samples` folder.
