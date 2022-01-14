@@ -34,13 +34,13 @@ You don't need to build up the hole project with the hardware for it.
 
 To test, if the settings for alsa softvol and equal works with c.
 
-    gcc ./set_alsa.c -o ./set_alsa -lasound -lm
+    gcc -o ./set_alsa ./set_alsa.c -lasound -lm
 
 ### drummachine.c
 
 To test, if the code works on a normal computer.
 
-    gcc ./drummachine.c ./drummachine -lsndfile -lpthread -lasound
+    gcc -o ./drummachine ./drummachine.c -lsndfile -lpthread -lasound
 
 ## start the main script
 
@@ -51,7 +51,7 @@ If everything works without the external circuits you can start the main script.
 The code for the whole project on raspi with MCP23017 and MCP3008 connection. See microcontroller.png for the circuit diagram.
 You can compile it with this command:
 
-    gcc ./groovebox.c ./groovebox -lsndfile -lasound -lpthread -lwiringPi -lm
+    gcc -o ./groovebox ./groovebox.c -lsndfile -lasound -lpthread -lwiringPi -lm
 
 ## use other sample files
 
