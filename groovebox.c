@@ -99,6 +99,8 @@ char *synth_folder = "synth";
 char *synth_equalizer_card = "synth_equal";
 
 int next_synths[SYNTHS];
+int synth_values[SYNTHS] = {0};
+int synth_led_values[SYNTHS] = {0};
 
 pthread_cond_t cond_synth[SYNTHS];
 pthread_mutex_t mutex_synth[SYNTHS];
@@ -300,7 +302,7 @@ bool is_poti_changed(long poti_value, long old_poti_value) {
 }
 
 bool is_button_debounced(struct timeval last_push, struct timeval read_time) {
-    long debounce_delay = 250 * 1000;
+    long debounce_delay = 150 * 1000;
 
     if (last_push.tv_sec == 0) {
         return true;
@@ -324,6 +326,8 @@ void hardware() {
 
     int old_power_led_values[DRUM_CHANNELS] = {-1};
     int old_pattern_led_values[DRUM_CHANNELS] = {-1};
+
+    int old_synth_led_values[SYNTHS] = {-1};
 
     long old_poti_synth_volume_value = 0;
     long old_poti_synth_equalizer_value = 0;
@@ -422,18 +426,18 @@ void hardware() {
             old_poti_synth_equalizer_value = poti_synth_equalizer_value;
         }
 
+        // set to play synthesizer
         for (int synth_id = 0; synth_id < SYNTHS; synth_id++) {
-            // play synthesizer
-            if (digitalRead(MCP23017_2 + synth_id) == 0) {
-                if (is_button_debounced(last_synth_push[synth_id], read_time)) {
-                    printf("EVENT: send information to play synth %d ->\n", synth_id);
-                    gettimeofday(&last_synth_push[synth_id], NULL);
-                    pthread_cond_signal(&cond_synth[synth_id]);
-                    fast_play_synths[synth_id] = 1;
-                    digitalWrite(MCP23017_3 + synth_id, 1);
-                }
-            } else {
-                digitalWrite(MCP23017_3 + synth_id, 0);
+            if (digitalRead(MCP23017_2 + synth_id) == 0 && is_button_debounced(last_synth_push[synth_id], read_time)) {
+                gettimeofday(&last_synth_push[synth_id], NULL);
+                synth_values[synth_id] = 1;
+                synth_led_values[synth_id] = 1;
+            }
+
+            // switch led
+            if (synth_led_values[synth_id] != old_synth_led_values[synth_id]) {
+                digitalWrite(MCP23017_3 + synth_id, synth_led_values[synth_id]);
+                old_synth_led_values[synth_id] = synth_led_values[synth_id];
             }
         }
 
@@ -516,6 +520,8 @@ int main(int argc, char **argv) {
     while (1) {
         for (int beat = 0; beat < 16; beat++) {
             gettimeofday(&start_time, NULL);
+
+            // play drums
             for (int channel_id = 0; channel_id < DRUM_CHANNELS; channel_id++) {
                 if (pattern[channel_id][beat] == '1') {
                     pattern_led_values[channel_id] = 1;
@@ -531,6 +537,20 @@ int main(int argc, char **argv) {
                 } else {
                     pattern_led_values[channel_id] = 0;
                     power_led_values[channel_id] = 0;
+                }
+            }
+
+            // play synthesizers
+            if (beat % 2 == 0) {
+                for (int synth_id = 0; synth_id < SYNTHS; synth_id++) {
+                    if (synth_values[synth_id] == 1) {
+                        printf("DEBUG: send information to play synth %d ->\n", synth_id);
+                        pthread_cond_signal(&cond_synth[synth_id]);
+                        fast_play_synths[synth_id] = 1;
+                        synth_values[synth_id] = 0;
+                    } else {
+                        synth_led_values[synth_id] = 0;
+                    }
                 }
             }
 
